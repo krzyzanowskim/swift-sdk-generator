@@ -14,6 +14,26 @@ import class AsyncHTTPClient.HTTPClient
 @_exported import Crypto
 import struct Logging.Logger
 @_exported import struct SystemPackage.FilePath
+import Helpers
+
+public func withEngine(
+  _ fileSystem: any FileSystem,
+  _ logger: Logger,
+  cacheLocation: SQLite.Location,
+  _ body: @Sendable (Engine) async throws -> ()
+) async throws {
+  let engine = Engine(
+    fileSystem,
+    logger,
+    cacheLocation: cacheLocation
+  )
+
+  try await withAsyncThrowing {
+    try await body(engine)
+  } defer: {
+    try await engine.shutDown()
+  }
+}
 
 /// Cacheable computations engine. Currently the engine makes an assumption that computations produce same results for
 /// the same query values and write results to a single file path.
@@ -29,11 +49,11 @@ public actor Engine {
 
   /// Creates a new instance of the ``Engine`` actor. Requires an explicit call to ``Engine//shutdown`` before the
   /// instance is deinitialized. The recommended approach to resource management is to place
-  /// `defer { engine.shutDown }` on the line that follows this initializer call.
+  /// `engine.shutDown()` when the engine is no longer used, but is not deinitialized yet.
   /// - Parameter fileSystem: Implementation of a file system this engine should use.
   /// - Parameter cacheLocation: Location of cache storage used by the engine.
   /// - Parameter logger: Logger to use during queries execution.
-  public init(
+  init(
     _ fileSystem: any FileSystem,
     _ logger: Logger,
     cacheLocation: SQLite.Location

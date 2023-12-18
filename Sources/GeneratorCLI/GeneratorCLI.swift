@@ -11,6 +11,8 @@
 //===----------------------------------------------------------------------===//
 
 import ArgumentParser
+import Logging
+import ServiceLifecycle
 import SwiftSDKGenerator
 import FoundationInternationalization
 
@@ -49,10 +51,10 @@ struct GeneratorCLI: AsyncParsableCommand {
   var swiftBranch: String? = nil
 
   @Option(help: "Version of Swift to supply in the bundle.")
-  var swiftVersion = "5.9-RELEASE"
+  var swiftVersion = "5.9.2-RELEASE"
 
   @Option(help: "Version of LLD linker to supply in the bundle.")
-  var lldVersion = "16.0.5"
+  var lldVersion = "17.0.5"
 
   @Option(
     help: """
@@ -89,7 +91,7 @@ struct GeneratorCLI: AsyncParsableCommand {
   )
   var targetArch: Triple.CPU? = nil
 
-  mutating func run() async throws {
+  func run() async throws {
     let linuxDistributionDefaultVersion = switch self.linuxDistributionName {
     case .rhel:
       "ubi9"
@@ -100,6 +102,7 @@ struct GeneratorCLI: AsyncParsableCommand {
     let linuxDistribution = try LinuxDistribution(name: linuxDistributionName, version: linuxDistributionVersion)
 
     let elapsed = try await ContinuousClock().measure {
+      let logger = Logger(label: "org.swift.swift-sdk-generator")
       let generator = try await SwiftSDKGenerator(
         hostCPUArchitecture: self.hostArch,
         targetCPUArchitecture: self.targetArch,
@@ -110,15 +113,23 @@ struct GeneratorCLI: AsyncParsableCommand {
         shouldUseDocker: self.withDocker,
         baseDockerImage: self.fromContainerImage,
         artifactID: self.sdkName,
-        isVerbose: self.verbose
+        isIncremental: self.incremental,
+        isVerbose: self.verbose,
+        logger: logger
       )
-      do {
-        try await generator.generateBundle(shouldGenerateFromScratch: !self.incremental)
-        try await generator.shutDown()
-      } catch {
-        try await generator.shutDown()
-        throw error
-      }
+
+      let serviceGroup = ServiceGroup(
+        configuration: .init(
+          services: [.init(
+            service: generator,
+            successTerminationBehavior: .gracefullyShutdownGroup
+          )],
+          cancellationSignals: [.sigint],
+          logger: logger
+        )
+      )
+
+      try await serviceGroup.run()
     }
 
     print("\nTime taken for this generator run: \(elapsed.formatted()).")

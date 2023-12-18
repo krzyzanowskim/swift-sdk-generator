@@ -14,6 +14,7 @@ import Foundation
 import GeneratorEngine
 import Logging
 import SystemPackage
+import Helpers
 
 /// Top-level actor that sequences all of the required SDK generation steps.
 public actor SwiftSDKGenerator {
@@ -24,11 +25,11 @@ public actor SwiftSDKGenerator {
   let pathsConfiguration: PathsConfiguration
   var downloadableArtifacts: DownloadableArtifacts
   let shouldUseDocker: Bool
-  let baseDockerImage: String
+  let baseDockerImage: String?
+  let isIncremental: Bool
   let isVerbose: Bool
-
-  let engine: Engine
-  private var isShutDown = false
+  let engineCachePath: SQLite.Location
+  let logger: Logger
 
   public init(
     hostCPUArchitecture: Triple.CPU?,
@@ -40,7 +41,9 @@ public actor SwiftSDKGenerator {
     shouldUseDocker: Bool,
     baseDockerImage: String?,
     artifactID: String?,
-    isVerbose: Bool
+    isIncremental: Bool,
+    isVerbose: Bool,
+    logger: Logger
   ) async throws {
     logGenerationStep("Looking up configuration values...")
 
@@ -90,30 +93,16 @@ public actor SwiftSDKGenerator {
       self.pathsConfiguration
     )
     self.shouldUseDocker = shouldUseDocker
-    self.baseDockerImage = baseDockerImage ?? self.versionsConfiguration.swiftBaseDockerImage
+    self.baseDockerImage = if shouldUseDocker {
+      baseDockerImage ?? self.versionsConfiguration.swiftBaseDockerImage
+    } else {
+      nil
+    }
+    self.isIncremental = isIncremental
     self.isVerbose = isVerbose
 
-    let engineCachePath = self.pathsConfiguration.artifactsCachePath.appending("cache.db")
-    self.engine = .init(
-      LocalFileSystem(),
-      Logger(label: "org.swift.swift-sdk-generator"),
-      cacheLocation: .path(engineCachePath)
-    )
-  }
-
-  public func shutDown() async throws {
-    precondition(!self.isShutDown, "`SwiftSDKGenerator/shutDown` should be called only once")
-    try await self.engine.shutDown()
-
-    self.isShutDown = true
-  }
-
-  deinit {
-    let isShutDown = self.isShutDown
-    precondition(
-      isShutDown,
-      "`Engine/shutDown` should be called explicitly on instances of `Engine` before deinitialization"
-    )
+    self.engineCachePath = .path(self.pathsConfiguration.artifactsCachePath.appending("cache.db"))
+    self.logger = logger
   }
 
   private let fileManager = FileManager.default
@@ -159,11 +148,28 @@ public actor SwiftSDKGenerator {
     )
   }
 
+  func doesPathExist(
+    _ containerPath: FilePath,
+    inContainer id: String
+  ) async throws -> Bool {
+    let result = try await Shell.readStdout(
+      #"\#(Self.dockerCommand) exec \#(id) sh -c 'test -e "\#(containerPath)" && echo "y" || echo "n"'"#,
+      shouldLogCommands: self.isVerbose
+    )
+    .trimmingCharacters(in: .whitespacesAndNewlines)
+    return result == "y"
+  }
+
   func copyFromDockerContainer(
     id: String,
     from containerPath: FilePath,
-    to localPath: FilePath
+    to localPath: FilePath,
+    failIfNotExists: Bool = true
   ) async throws {
+    if !failIfNotExists {
+      guard try await doesPathExist(containerPath, inContainer: id)
+      else { return }
+    }
     try await Shell.run(
       "\(Self.dockerCommand) cp \(id):\(containerPath) \(localPath)",
       shouldLogCommands: self.isVerbose
@@ -177,6 +183,16 @@ public actor SwiftSDKGenerator {
       """,
       shouldLogCommands: self.isVerbose
     )
+  }
+
+  func withDockerContainer(fromImage imageName: String,
+                           _ body: @Sendable (String) async throws -> ()) async throws {
+    let containerID = try await launchDockerContainer(imageName: imageName)
+    try await withAsyncThrowing {
+      try await body(containerID)
+    } defer: {
+      try await stopDockerContainer(id: containerID)
+    }
   }
 
   func doesFileExist(at path: FilePath) -> Bool {

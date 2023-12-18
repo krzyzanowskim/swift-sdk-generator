@@ -26,6 +26,7 @@ let package = Package(
     .package(url: "https://github.com/apple/swift-nio.git", from: "2.61.1"),
     .package(url: "https://github.com/apple/swift-nio-extras.git", from: "1.19.0"),
     .package(url: "https://github.com/apple/swift-log.git", from: "1.5.3"),
+    .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.3.0"),
     .package(url: "https://github.com/apple/swift-syntax.git", from: "509.0.2"),
     .package(url: "https://github.com/apple/swift-foundation.git", revision: "9a9e3c1"),
   ],
@@ -37,6 +38,7 @@ let package = Package(
       dependencies: [
         "SwiftSDKGenerator",
         .product(name: "ArgumentParser", package: "swift-argument-parser"),
+        .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
         .product(name: "FoundationInternationalization", package: "swift-foundation"),
       ],
       swiftSettings: [
@@ -50,8 +52,10 @@ let package = Package(
         .product(name: "AsyncAlgorithms", package: "swift-async-algorithms"),
         .product(name: "AsyncHTTPClient", package: "async-http-client"),
         .product(name: "Logging", package: "swift-log"),
+        .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
         .product(name: "SystemPackage", package: "swift-system"),
         "GeneratorEngine",
+        "Helpers",
       ],
       exclude: ["Dockerfiles"],
       swiftSettings: [
@@ -74,6 +78,7 @@ let package = Package(
         .product(name: "Crypto", package: "swift-crypto"),
         .product(name: "Logging", package: "swift-log"),
         .product(name: "SystemPackage", package: "swift-system"),
+        "Helpers",
         "Macros",
         "SystemSQLite",
       ]
@@ -82,6 +87,18 @@ let package = Package(
       name: "GeneratorEngineTests",
       dependencies: [
         "GeneratorEngine",
+      ]
+    ),
+    .target(
+      name: "Helpers",
+      swiftSettings: [
+        .enableExperimentalFeature("StrictConcurrency=complete"),
+      ]
+    ),
+    .testTarget(
+      name: "HelpersTests",
+      dependencies: [
+        "Helpers",
       ]
     ),
     .macro(
