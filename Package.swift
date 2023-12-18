@@ -28,7 +28,10 @@ let package = Package(
     .package(url: "https://github.com/apple/swift-log.git", from: "1.5.3"),
     .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.3.0"),
     .package(url: "https://github.com/apple/swift-syntax.git", from: "509.0.2"),
-    .package(url: "https://github.com/apple/swift-foundation.git", revision: "9a9e3c1"),
+    .package(
+      url: "https://github.com/apple/swift-foundation.git",
+      revision: "ea334c656b282fb7c7fe33f2063a32a7e475d4cf"
+    ),
   ],
   targets: [
     // Targets are the basic building blocks of a package. A target can define a module or a test suite.
